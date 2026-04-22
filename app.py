@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import random
 import re
 import zipfile
@@ -14,6 +15,8 @@ from flask import Flask, jsonify, render_template, request, send_file
 from PIL import Image, ImageOps
 
 app = Flask(__name__)
+# 200 MB upload limit — large enough for batches of high-res photos
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
 
 POST_W = 1080
 POST_H = 1350
@@ -300,4 +303,6 @@ def export_layout_route():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # Used only during local development; Gunicorn bypasses this block in production.
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host="0.0.0.0", port=port)

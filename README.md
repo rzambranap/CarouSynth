@@ -1,6 +1,6 @@
 # CarouSynth
 
-Local app for generating a randomized 10-slide Instagram carousel, then refining the composition manually in the browser before export.
+Browser app for generating a randomized 10-slide Instagram carousel, then refining the composition manually before export.
 
 ## What it does
 
@@ -11,7 +11,7 @@ Local app for generating a randomized 10-slide Instagram carousel, then refining
 - The browser UI lets you drag, resize, reorder, import/export JSON, and export a ZIP.
 - Export creates a ZIP containing a named folder with `carousel_01.png` to `carousel_10.png` and `layout.json`.
 
-## Quick start
+## Quick start (local)
 
 ```bash
 python -m venv .venv
@@ -22,17 +22,40 @@ python app.py
 
 Then open `http://127.0.0.1:5000`.
 
+## Deploy to Render (free tier)
+
+1. Push this repo to GitHub.
+2. Go to [render.com](https://render.com) → **New → Web Service**.
+3. Connect your GitHub repo.
+4. Render auto-detects the `Procfile`. Accept the defaults and click **Deploy**.
+5. The app will be live at the URL Render provides.
+
+## Deploy to Heroku
+
+```bash
+heroku create
+git push heroku main
+heroku open
+```
+
+## Deploy to Railway
+
+1. Go to [railway.app](https://railway.app) → **New Project → Deploy from GitHub repo**.
+2. Select this repo. Railway reads the `Procfile` automatically.
+3. Click **Deploy**.
+
 ## Notes
 
 - Upload at least 10 unique images.
 - Duplicate uploads are filtered by file content hash.
-- The requested image count is capped by the number of unique uploads.
-- The UI uses downsampled previews for responsiveness, but export uses the layout data to build the final slides.
+- The requested image count is capped by the number of unique uploads (max 200).
+- The UI uses downsampled previews for responsiveness; export uses the full-resolution layout data.
+- Upload limit is 200 MB per request.
 
 ## Repo structure
 
 - `app.py` — Flask backend and randomized layout generator.
 - `templates/index.html` — browser UI.
-- `requirements.txt` — Python dependencies.
-- `run.sh` — quick launcher.
-- `.gitignore` — Python local env ignores.
+- `requirements.txt` — Python dependencies (`Flask`, `Pillow`, `gunicorn`).
+- `Procfile` — tells PaaS hosts to serve with Gunicorn.
+- `run.sh` — quick local launcher.
