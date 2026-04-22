@@ -1044,9 +1044,9 @@
     _genBtn.addEventListener('click', () => {
       _genBtn.classList.add('loading');
       _genBtn.disabled = true;
-      /* GEN_SPINNER_TIMEOUT_MS: generous upper bound covering slow uploads + server rendering time */
-      const GEN_SPINNER_TIMEOUT_MS = 60_000;
-      _genSpinnerTimer = setTimeout(_clearGenSpinner, GEN_SPINNER_TIMEOUT_MS);
+      /* generous upper bound covering slow uploads + server rendering time */
+      const GENERATE_TIMEOUT_MS = 60_000;
+      _genSpinnerTimer = setTimeout(_clearGenSpinner, GENERATE_TIMEOUT_MS);
     }, true);
 
     /* Remove loading state when:
