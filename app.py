@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import json
+import os
 import random
 import re
 import zipfile
@@ -11,9 +12,22 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from flask import Flask, jsonify, render_template, request, send_file
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from PIL import Image, ImageOps
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", os.urandom(32))
+
+# Cap total upload size at 200 MB
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "60 per hour"],
+    storage_uri="memory://",
+)
 
 POST_W = 1080
 POST_H = 1350
@@ -25,6 +39,7 @@ SPILL_LEFT = 0.6
 SPILL_RIGHT = 1.6
 DEFAULT_IMAGE_COUNT = 30
 MAX_IMAGE_COUNT = 200
+MAX_SINGLE_FILE_BYTES = 20 * 1024 * 1024  # 20 MB per image
 
 
 def clamp(v: float, lo: float, hi: float) -> float:
@@ -136,6 +151,10 @@ def read_unique_uploads(uploaded_files) -> list[dict[str, Any]]:
         raw = storage.read()
         if not raw:
             continue
+        if len(raw) > MAX_SINGLE_FILE_BYTES:
+            raise ValueError(
+                f"File '{storage.filename}' exceeds the 20 MB per-image limit."
+            )
         digest = hashlib.sha1(raw).hexdigest()
         if digest in seen:
             continue
@@ -224,12 +243,18 @@ def generate_layout(uploaded_files, seed: int, image_count: int) -> dict[str, An
     }
 
 
+@app.get("/health")
+def health():
+    return jsonify({"status": "ok"})
+
+
 @app.get("/")
 def index():
     return render_template("index.html")
 
 
 @app.post("/generate-layout")
+@limiter.limit("10 per minute")
 def generate_layout_route():
     files = request.files.getlist("images")
     try:
@@ -246,11 +271,14 @@ def generate_layout_route():
         layout = generate_layout(files, seed, image_count)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
+    except Exception:
+        return jsonify({"error": "An unexpected error occurred while generating the layout."}), 500
 
     return jsonify(layout)
 
 
 @app.post("/export-layout")
+@limiter.limit("10 per minute")
 def export_layout_route():
     payload = request.get_json(force=True)
     folder_name = sanitize_folder_name(payload.get("folderName", "carousel_export"))
@@ -300,4 +328,5 @@ def export_layout_route():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+    app.run(debug=debug, port=int(os.environ.get("PORT", 5000)))

@@ -30,6 +30,16 @@
     progress { width: 100%; height: 14px; }
     .progress-meta { font-size: 12px; color: #64748b; margin-top: 6px; }
     .inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    /* Spinner */
+    .spinner { display: none; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: white; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
+    .spinner.dark { border-color: rgba(15,23,42,.2); border-top-color: #0f172a; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* Mobile layout */
+    @media (max-width: 768px) {
+      .shell { grid-template-columns: 1fr; height: auto; }
+      .stage-wrap { min-height: 50vh; }
+      .toolbar { flex-direction: column; align-items: flex-start; gap: 6px; }
+    }
   </style>
 </head>
 <body>
@@ -54,7 +64,7 @@
       </div>
 
       <div class="row group">
-        <button id="generateBtn">Generate layout</button>
+        <button id="generateBtn"><span id="generateSpinner" class="spinner"></span>Generate layout</button>
         <button id="resetBtn" class="secondary">Reset view</button>
       </div>
 
@@ -100,7 +110,7 @@
       </div>
 
       <div class="row group">
-        <button id="exportBtn" disabled>Export zip</button>
+        <button id="exportBtn" disabled><span id="exportSpinner" class="spinner"></span>Export zip</button>
       </div>
 
       <p class="hint">Upload images, choose a seed and image count, generate, adjust the layout, then export a ZIP containing a named folder with the 10 slides and the layout JSON.</p>
@@ -136,6 +146,9 @@
     const exportBtn = document.getElementById('exportBtn');
     const exportFolderEl = document.getElementById('exportFolder');
     const imageCountEl = document.getElementById('imageCount');
+    const generateBtn = document.getElementById('generateBtn');
+    const generateSpinner = document.getElementById('generateSpinner');
+    const exportSpinner = document.getElementById('exportSpinner');
 
     let state = {
       items: [],
@@ -391,17 +404,26 @@
       form.append('seed', document.getElementById('seed').value || '42');
       form.append('image_count', String(requestedCount));
 
+      generateBtn.disabled = true;
+      generateSpinner.style.display = 'inline-block';
       exportBtn.disabled = true;
       setStatus('Generating randomized layout...');
-      const res = await fetch('/generate-layout', { method: 'POST', body: form });
-      const payload = await res.json();
-      if (!res.ok) {
-        setStatus(payload.error || 'Failed to generate layout.', true);
-        return;
+      try {
+        const res = await fetch('/generate-layout', { method: 'POST', body: form });
+        const payload = await res.json();
+        if (!res.ok) {
+          setStatus(payload.error || 'Failed to generate layout.', true);
+          return;
+        }
+        imageCountEl.value = payload.imageCount || requestedCount;
+        layoutJsonEl.value = JSON.stringify(payload, null, 2);
+        await applyLayout(payload);
+      } catch (err) {
+        setStatus(err.message || 'Failed to generate layout.', true);
+      } finally {
+        generateBtn.disabled = false;
+        generateSpinner.style.display = 'none';
       }
-      imageCountEl.value = payload.imageCount || requestedCount;
-      layoutJsonEl.value = JSON.stringify(payload, null, 2);
-      await applyLayout(payload);
     }
 
     async function importJson() {
@@ -464,6 +486,8 @@
         return;
       }
 
+      exportBtn.disabled = true;
+      exportSpinner.style.display = 'inline-block';
       try {
         refreshJson();
         setStatus('Preparing export zip...');
@@ -491,6 +515,9 @@
         setStatus('Export complete.');
       } catch (err) {
         setStatus(err.message || 'Export failed.', true);
+      } finally {
+        exportSpinner.style.display = 'none';
+        exportBtn.disabled = !state.readyToExport;
       }
     }
 
