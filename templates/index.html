@@ -561,8 +561,8 @@
         <span class="muted">Dashed guides mark slide boundaries &mdash; click an image to select it.</span>
       </div>
       <div class="canvas-scroll">
-        <div class="canvas-empty-state" id="canvasEmptyState">
-          <div class="es-icon">🖼️</div>
+        <div class="canvas-empty-state" id="canvasEmptyState" aria-label="Canvas empty — generate a layout to begin">
+          <div class="es-icon" aria-hidden="true">🖼️</div>
           <p class="es-title">Your carousel will appear here</p>
           <p class="es-sub">Upload at least 10 images and click <strong>Generate&nbsp;layout</strong> to get started.</p>
         </div>
@@ -1009,32 +1009,62 @@
       toast.addEventListener('click', () => { clearTimeout(timer); dismiss(); });
     }
 
-    /* Observe #status → fire toasts */
+    /* Observe #status → fire toasts.
+       setStatus() sets style.color to one of two literal hex values; observe
+       both the text node and the style attribute so we catch every call. */
     const _statusEl = document.getElementById('status');
+
+    const ERROR_COLOR_HEX = '#b91c1c';
+    function _isStatusError() {
+      /* Match both the raw hex the script assigns and the browser-normalised rgb */
+      const c = _statusEl.style.color;
+      return c === ERROR_COLOR_HEX || c === 'rgb(185, 28, 28)';
+    }
+
     const _statusObserver = new MutationObserver(() => {
       const msg = _statusEl.textContent.trim();
       if (!msg) return;
-      const isError = _statusEl.style.color === 'rgb(185, 28, 28)';
-      showToast(msg, isError);
+      showToast(msg, _isStatusError());
     });
-    _statusObserver.observe(_statusEl, { childList: true, subtree: true, characterData: true });
+    _statusObserver.observe(_statusEl, {
+      childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['style'],
+    });
 
     /* ── Generate button spinner ── */
     const _genBtn = document.getElementById('generateBtn');
+    let _genSpinnerTimer = null;
+
+    function _clearGenSpinner() {
+      _genBtn.classList.remove('loading');
+      _genBtn.disabled = false;
+      if (_genSpinnerTimer) { clearTimeout(_genSpinnerTimer); _genSpinnerTimer = null; }
+    }
+
     /* Capture phase fires before the main click listener — adds loading state */
     _genBtn.addEventListener('click', () => {
       _genBtn.classList.add('loading');
       _genBtn.disabled = true;
+      /* Safety net: always clear after 60 s so the button never stays locked */
+      _genSpinnerTimer = setTimeout(_clearGenSpinner, 60000);
     }, true);
-    /* Remove loading state as soon as setStatus reports any result */
+
+    /* Remove loading state when:
+       (a) an error status is set, OR
+       (b) images start loading (loadingBar advances from 0 to > 0),
+       indicating the layout was successfully generated and applyLayout began. */
     const _genObserver = new MutationObserver(() => {
-      const msg = _statusEl.textContent.trim();
-      if (msg && msg !== 'Generating randomized layout...') {
-        _genBtn.classList.remove('loading');
-        _genBtn.disabled = false;
-      }
+      if (!_genBtn.classList.contains('loading')) return;
+      if (_isStatusError()) { _clearGenSpinner(); return; }
+      const done = Number(document.getElementById('loadingBar').value);
+      const total = Number(document.getElementById('loadingBar').max);
+      /* total resets to 1 (clearStage default) then jumps once items load */
+      if (total > 1 || (total === 1 && done === 1)) _clearGenSpinner();
     });
-    _genObserver.observe(_statusEl, { childList: true, subtree: true, characterData: true });
+    _genObserver.observe(_statusEl, {
+      childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['style'],
+    });
+    /* Also watch loadingBar value changes */
+    _genObserver.observe(document.getElementById('loadingBar'), { attributes: true, attributeFilter: ['value'] });
 
     /* ── Drag-and-drop upload zone ── */
     const _dropZone = document.getElementById('dropZone');
