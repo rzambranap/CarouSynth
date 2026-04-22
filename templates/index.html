@@ -1,0 +1,532 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CarouSynth</title>
+  <script src="https://unpkg.com/konva@9/konva.min.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f8fafc; color: #0f172a; }
+    .shell { display: grid; grid-template-columns: 380px 1fr; gap: 20px; padding: 20px; height: 100vh; box-sizing: border-box; }
+    .panel, .stage-wrap { background: white; border-radius: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }
+    .panel { padding: 20px; overflow: auto; }
+    h1 { font-size: 1.2rem; margin: 0 0 18px; }
+    .group { margin-bottom: 18px; }
+    label { display: block; font-size: .9rem; margin-bottom: 8px; font-weight: 600; }
+    input[type="file"], input[type="number"], input[type="color"], input[type="text"], textarea { width: 100%; box-sizing: border-box; }
+    input[type="file"], input[type="number"], input[type="color"], input[type="text"], textarea { border: 1px solid #cbd5e1; border-radius: 12px; padding: 10px 12px; background: white; }
+    textarea { min-height: 160px; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+    button { border: 0; background: #0f172a; color: white; padding: 10px 14px; border-radius: 12px; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #e2e8f0; color: #0f172a; }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .hint { font-size: 12px; color: #475569; line-height: 1.4; }
+    .stage-wrap { display: flex; flex-direction: column; }
+    .toolbar { padding: 14px 18px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .canvas-scroll { overflow: auto; padding: 16px; background: #f8fafc; flex: 1; }
+    .muted { color: #64748b; font-size: 13px; }
+    .status { font-size: 13px; margin-top: 8px; min-height: 18px; }
+    progress { width: 100%; height: 14px; }
+    .progress-meta { font-size: 12px; color: #64748b; margin-top: 6px; }
+    .inline-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel">
+      <h1>CarouSynth</h1>
+
+      <div class="group">
+        <label for="images">Upload images</label>
+        <input id="images" type="file" accept="image/*" multiple />
+      </div>
+
+      <div class="group inline-grid">
+        <div>
+          <label for="seed">Seed</label>
+          <input id="seed" type="number" value="42" />
+        </div>
+        <div>
+          <label for="imageCount">Number of images</label>
+          <input id="imageCount" type="number" value="30" min="10" step="1" />
+        </div>
+      </div>
+
+      <div class="row group">
+        <button id="generateBtn">Generate layout</button>
+        <button id="resetBtn" class="secondary">Reset view</button>
+      </div>
+
+      <div class="group inline-grid">
+        <div>
+          <label for="bg">Background</label>
+          <input id="bg" type="color" value="#ffffff" />
+        </div>
+        <div>
+          <label for="zoom">Zoom</label>
+          <input id="zoom" type="range" min="3" max="15" step="0.5" value="8" />
+        </div>
+      </div>
+
+      <div class="group">
+        <label>Selected image</label>
+        <div class="row">
+          <button id="bringForwardBtn" class="secondary">Bring forward</button>
+          <button id="sendBackwardBtn" class="secondary">Send backward</button>
+          <button id="bringFrontBtn" class="secondary">Bring to front</button>
+          <button id="sendBackBtn" class="secondary">Send to back</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <label for="exportFolder">Export folder name</label>
+        <input id="exportFolder" type="text" value="carousel_export" />
+      </div>
+
+      <div class="group">
+        <label for="layoutJson">Layout JSON</label>
+        <textarea id="layoutJson" placeholder="Generated layout appears here. You can also paste a layout here and import it."></textarea>
+        <div class="row" style="margin-top:8px;">
+          <button id="importJsonBtn" class="secondary">Import JSON</button>
+          <button id="refreshJsonBtn" class="secondary">Refresh JSON</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <label>Loading progress</label>
+        <progress id="loadingBar" max="100" value="0"></progress>
+        <div id="loadingMeta" class="progress-meta">0 / 0 images loaded</div>
+      </div>
+
+      <div class="row group">
+        <button id="exportBtn" disabled>Export zip</button>
+      </div>
+
+      <p class="hint">Upload images, choose a seed and image count, generate, adjust the layout, then export a ZIP containing a named folder with the 10 slides and the layout JSON.</p>
+      <div id="status" class="status muted"></div>
+    </aside>
+
+    <main class="stage-wrap">
+      <div class="toolbar">
+        <strong>CarouSynth canvas</strong>
+        <span class="muted">Dashed guides mark slide boundaries.</span>
+      </div>
+      <div class="canvas-scroll">
+        <div id="stage-container"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const POST_W = 1080;
+    const POST_H = 1350;
+    const N_POSTS = 10;
+    const CANVAS_W = POST_W * N_POSTS;
+    const CANVAS_H = POST_H;
+    const PREVIEW_MAX_SIDE = 600;
+
+    const stageContainer = document.getElementById('stage-container');
+    const layoutJsonEl = document.getElementById('layoutJson');
+    const bgInput = document.getElementById('bg');
+    const zoomInput = document.getElementById('zoom');
+    const statusEl = document.getElementById('status');
+    const loadingBarEl = document.getElementById('loadingBar');
+    const loadingMetaEl = document.getElementById('loadingMeta');
+    const exportBtn = document.getElementById('exportBtn');
+    const exportFolderEl = document.getElementById('exportFolder');
+    const imageCountEl = document.getElementById('imageCount');
+
+    let state = {
+      items: [],
+      layout: null,
+      selectedNode: null,
+      transformer: null,
+      stage: null,
+      layer: null,
+      bgRect: null,
+      guides: [],
+      zoom: Number(zoomInput.value),
+      readyToExport: false,
+      loadTotal: 0,
+      loadDone: 0,
+    };
+
+    function setStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.style.color = isError ? '#b91c1c' : '#475569';
+    }
+
+    function updateLoading(done, total) {
+      state.loadDone = done;
+      state.loadTotal = total;
+      loadingBarEl.max = Math.max(total, 1);
+      loadingBarEl.value = done;
+      loadingMetaEl.textContent = `${done} / ${total} images loaded`;
+      state.readyToExport = total > 0 && done === total;
+      exportBtn.disabled = !state.readyToExport;
+    }
+
+    function serializeLayout() {
+      const ordered = getOrderedItems();
+      return JSON.stringify({
+        postWidth: POST_W,
+        postHeight: POST_H,
+        nPosts: N_POSTS,
+        background: bgInput.value,
+        seed: Number(document.getElementById('seed').value || 42),
+        imageCount: Number(imageCountEl.value || 30),
+        items: ordered.map(item => ({
+          id: item.id,
+          name: item.name,
+          src: item.src,
+          x: item.node.x(),
+          y: item.node.y(),
+          width: item.node.width() * item.node.scaleX(),
+          height: item.node.height() * item.node.scaleY(),
+          rotation: item.node.rotation(),
+        })),
+      }, null, 2);
+    }
+
+    function clearStage() {
+      stageContainer.innerHTML = '';
+      state.selectedNode = null;
+      state.transformer = null;
+      state.stage = null;
+      state.layer = null;
+      state.bgRect = null;
+      state.guides = [];
+      state.items = [];
+      updateLoading(0, 0);
+      exportBtn.disabled = true;
+    }
+
+    function createStage() {
+      clearStage();
+      const scale = 1 / state.zoom;
+      const stage = new Konva.Stage({
+        container: 'stage-container',
+        width: CANVAS_W * scale,
+        height: CANVAS_H * scale,
+        scaleX: scale,
+        scaleY: scale,
+      });
+      const layer = new Konva.Layer();
+      const bgRect = new Konva.Rect({ x: 0, y: 0, width: CANVAS_W, height: CANVAS_H, fill: bgInput.value });
+      layer.add(bgRect);
+
+      const guides = [];
+      for (let i = 1; i < N_POSTS; i++) {
+        const guide = new Konva.Line({
+          points: [i * POST_W, 0, i * POST_W, POST_H],
+          stroke: '#94a3b8',
+          strokeWidth: 4,
+          dash: [24, 18],
+          listening: false,
+        });
+        guides.push(guide);
+        layer.add(guide);
+      }
+
+      const transformer = new Konva.Transformer({
+        rotateEnabled: false,
+        keepRatio: true,
+        enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+      });
+
+      stage.on('mousedown touchstart', (e) => {
+        if (e.target === stage) {
+          transformer.nodes([]);
+          state.selectedNode = null;
+          layer.draw();
+        }
+      });
+
+      layer.add(transformer);
+      stage.add(layer);
+      state.stage = stage;
+      state.layer = layer;
+      state.transformer = transformer;
+      state.bgRect = bgRect;
+      state.guides = guides;
+    }
+
+    function downsampleImageElement(fullImage) {
+      const longSide = Math.max(fullImage.naturalWidth || fullImage.width, fullImage.naturalHeight || fullImage.height);
+      if (longSide <= PREVIEW_MAX_SIDE) return fullImage;
+
+      const scale = PREVIEW_MAX_SIDE / longSide;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round((fullImage.naturalWidth || fullImage.width) * scale));
+      canvas.height = Math.max(1, Math.round((fullImage.naturalHeight || fullImage.height) * scale));
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(fullImage, 0, 0, canvas.width, canvas.height);
+
+      const previewImage = new window.Image();
+      previewImage.src = canvas.toDataURL('image/jpeg', 0.82);
+      return previewImage;
+    }
+
+    function loadImage(src) {
+      return new Promise((resolve, reject) => {
+        const img = new window.Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed to load image'));
+        img.src = src;
+      });
+    }
+
+    function updateTransformerTop() {
+      if (!state.layer || !state.transformer) return;
+      state.guides.forEach(g => g.moveToTop());
+      state.transformer.moveToTop();
+    }
+
+    async function makeKonvaImage(item) {
+      const fullImage = await loadImage(item.src);
+      const previewImage = downsampleImageElement(fullImage);
+      if (previewImage !== fullImage && !previewImage.complete) {
+        await new Promise((resolve, reject) => {
+          previewImage.onload = resolve;
+          previewImage.onerror = reject;
+        });
+      }
+
+      const node = new Konva.Image({
+        x: item.x,
+        y: item.y,
+        image: previewImage,
+        width: item.width,
+        height: item.height,
+        draggable: true,
+        id: item.id,
+      });
+
+      node.on('click tap', () => {
+        state.selectedNode = node;
+        state.transformer.nodes([node]);
+        updateTransformerTop();
+        state.layer.draw();
+      });
+
+      node.on('dragend', () => {
+        layoutJsonEl.value = serializeLayout();
+      });
+
+      node.on('transformend', () => {
+        const scaleX = node.scaleX();
+        const scaleY = node.scaleY();
+        node.width(Math.max(50, node.width() * scaleX));
+        node.height(Math.max(50, node.height() * scaleY));
+        node.scaleX(1);
+        node.scaleY(1);
+        layoutJsonEl.value = serializeLayout();
+      });
+
+      state.layer.add(node);
+      const stored = { ...item, node, fullImage };
+      state.items.push(stored);
+      updateTransformerTop();
+      state.layer.draw();
+      return stored;
+    }
+
+    function getOrderedItems() {
+      return [...state.items].sort((a, b) => a.node.zIndex() - b.node.zIndex());
+    }
+
+    function normalizeLayoutItems(layout) {
+      const seen = new Set();
+      return (layout.items || []).filter(item => {
+        const key = item.id || `${item.name}|${item.x}|${item.y}|${item.width}|${item.height}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    async function applyLayout(layout) {
+      createStage();
+      bgInput.value = layout.background || '#ffffff';
+      state.bgRect.fill(bgInput.value);
+      const items = normalizeLayoutItems(layout);
+      updateLoading(0, items.length);
+      setStatus('Loading selected images into CarouSynth...');
+
+      for (let i = 0; i < items.length; i++) {
+        try {
+          await makeKonvaImage(items[i]);
+        } catch (err) {
+          console.error(err);
+        }
+        updateLoading(i + 1, items.length);
+      }
+
+      const nextLayout = { ...layout, items: normalizeLayoutItems(JSON.parse(serializeLayout())) };
+      layoutJsonEl.value = JSON.stringify(nextLayout, null, 2);
+      state.layout = nextLayout;
+      setStatus(`Loaded ${state.items.length} images into CarouSynth.`);
+    }
+
+    async function generateLayout() {
+      const files = document.getElementById('images').files;
+      if (!files.length) {
+        setStatus('Upload images first.', true);
+        return;
+      }
+
+      const requestedCount = Number(imageCountEl.value || 30);
+      if (files.length < 10) {
+        setStatus('Upload at least 10 images so every frame has one.', true);
+        return;
+      }
+      if (requestedCount < 10) {
+        setStatus('Number of images must be at least 10.', true);
+        return;
+      }
+
+      const form = new FormData();
+      for (const file of files) form.append('images', file);
+      form.append('seed', document.getElementById('seed').value || '42');
+      form.append('image_count', String(requestedCount));
+
+      exportBtn.disabled = true;
+      setStatus('Generating randomized layout...');
+      const res = await fetch('/generate-layout', { method: 'POST', body: form });
+      const payload = await res.json();
+      if (!res.ok) {
+        setStatus(payload.error || 'Failed to generate layout.', true);
+        return;
+      }
+      imageCountEl.value = payload.imageCount || requestedCount;
+      layoutJsonEl.value = JSON.stringify(payload, null, 2);
+      await applyLayout(payload);
+    }
+
+    async function importJson() {
+      try {
+        const parsed = JSON.parse(layoutJsonEl.value);
+        if (!parsed.items) throw new Error('Missing items array');
+        if (parsed.seed != null) document.getElementById('seed').value = parsed.seed;
+        if (parsed.imageCount != null) imageCountEl.value = parsed.imageCount;
+        await applyLayout(parsed);
+      } catch (err) {
+        setStatus(`Invalid layout JSON: ${err.message}`, true);
+      }
+    }
+
+    function refreshJson() {
+      if (!state.stage) return;
+      layoutJsonEl.value = serializeLayout();
+      state.layout = JSON.parse(layoutJsonEl.value);
+      setStatus('Layout JSON refreshed from current canvas.');
+    }
+
+    function bringSelectedForward() {
+      if (!state.selectedNode) return;
+      state.selectedNode.moveUp();
+      updateTransformerTop();
+      state.layer.draw();
+      refreshJson();
+    }
+
+    function sendSelectedBackward() {
+      if (!state.selectedNode) return;
+      const minZ = state.bgRect.zIndex() + 1;
+      if (state.selectedNode.zIndex() > minZ) {
+        state.selectedNode.moveDown();
+      }
+      updateTransformerTop();
+      state.layer.draw();
+      refreshJson();
+    }
+
+    function bringSelectedToFront() {
+      if (!state.selectedNode) return;
+      state.selectedNode.moveToTop();
+      updateTransformerTop();
+      state.layer.draw();
+      refreshJson();
+    }
+
+    function sendSelectedToBack() {
+      if (!state.selectedNode) return;
+      state.selectedNode.zIndex(state.bgRect.zIndex() + 1);
+      updateTransformerTop();
+      state.layer.draw();
+      refreshJson();
+    }
+
+    async function exportSlides() {
+      if (!state.readyToExport || !state.items.length) {
+        setStatus('Wait until all images are displayed before exporting.', true);
+        return;
+      }
+
+      try {
+        refreshJson();
+        setStatus('Preparing export zip...');
+        const res = await fetch('/export-layout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            folderName: exportFolderEl.value || 'carousel_export',
+            layout: JSON.parse(layoutJsonEl.value),
+          }),
+        });
+
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({}));
+          throw new Error(payload.error || 'Export failed');
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${(exportFolderEl.value || 'carousel_export').trim() || 'carousel_export'}.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        setStatus('Export complete.');
+      } catch (err) {
+        setStatus(err.message || 'Export failed.', true);
+      }
+    }
+
+    document.getElementById('generateBtn').addEventListener('click', generateLayout);
+    document.getElementById('importJsonBtn').addEventListener('click', importJson);
+    document.getElementById('refreshJsonBtn').addEventListener('click', refreshJson);
+    document.getElementById('bringForwardBtn').addEventListener('click', bringSelectedForward);
+    document.getElementById('sendBackwardBtn').addEventListener('click', sendSelectedBackward);
+    document.getElementById('bringFrontBtn').addEventListener('click', bringSelectedToFront);
+    document.getElementById('sendBackBtn').addEventListener('click', sendSelectedToBack);
+    document.getElementById('exportBtn').addEventListener('click', exportSlides);
+    document.getElementById('resetBtn').addEventListener('click', async () => {
+      if (state.layout) await applyLayout(state.layout);
+    });
+
+    bgInput.addEventListener('input', () => {
+      if (state.bgRect) {
+        state.bgRect.fill(bgInput.value);
+        state.layer.draw();
+        if (state.readyToExport) refreshJson();
+      }
+    });
+
+    zoomInput.addEventListener('input', async () => {
+      state.zoom = Number(zoomInput.value);
+      if (layoutJsonEl.value.trim()) {
+        try {
+          const parsed = JSON.parse(layoutJsonEl.value);
+          await applyLayout(parsed);
+        } catch (_) {}
+      } else {
+        createStage();
+      }
+    });
+
+    createStage();
+  </script>
+</body>
+</html>
