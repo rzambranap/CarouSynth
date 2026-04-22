@@ -1016,7 +1016,7 @@
 
     const ERROR_COLOR_HEX = '#b91c1c';
     function _isStatusError() {
-      /* Match both the raw hex the script assigns and the browser-normalised rgb */
+      /* Match both the raw hex the script assigns and the browser-normalized rgb */
       const c = _statusEl.style.color;
       return c === ERROR_COLOR_HEX || c === 'rgb(185, 28, 28)';
     }
@@ -1044,8 +1044,9 @@
     _genBtn.addEventListener('click', () => {
       _genBtn.classList.add('loading');
       _genBtn.disabled = true;
-      /* Safety net: always clear after 60 s so the button never stays locked */
-      _genSpinnerTimer = setTimeout(_clearGenSpinner, 60000);
+      /* GEN_SPINNER_TIMEOUT_MS: generous upper bound covering slow uploads + server rendering time */
+      const GEN_SPINNER_TIMEOUT_MS = 60_000;
+      _genSpinnerTimer = setTimeout(_clearGenSpinner, GEN_SPINNER_TIMEOUT_MS);
     }, true);
 
     /* Remove loading state when:
@@ -1057,7 +1058,9 @@
       if (_isStatusError()) { _clearGenSpinner(); return; }
       const done = Number(document.getElementById('loadingBar').value);
       const total = Number(document.getElementById('loadingBar').max);
-      /* total resets to 1 (clearStage default) then jumps once items load */
+      /* loadingBarEl.max starts at 1 (clearStage calls updateLoading(0,0) which sets max=max(0,1)=1);
+       when items actually load it jumps above 1. total===1 && done===1 catches a
+       single-item edge case but is mainly a guard for the initial cleared state. */
       if (total > 1 || (total === 1 && done === 1)) _clearGenSpinner();
     });
     _genObserver.observe(_statusEl, {
